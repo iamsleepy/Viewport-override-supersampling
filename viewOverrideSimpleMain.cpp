@@ -24,7 +24,7 @@ MStatus initializePlugin(MObject obj)
 	if (renderer)
 	{
 		// We register with a given name
-		viewOverrideSimple *overridePtr = new viewOverrideSimple("viewOverrideSimple");
+		ViewOverrideSimple *overridePtr = new ViewOverrideSimple("viewOverrideSimple");
 		if (overridePtr)
 		{
 			renderer->registerOverride(overridePtr);

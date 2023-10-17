@@ -11,21 +11,23 @@
 #include <maya/MRenderTarget.h>
 #include <maya/MDrawContext.h>
 #include <maya/MImage.h>
-#include <maya/MGlobal.h>
+#include <maya/MFnCamera.h>
+
 // For override creation we return a UI name so that it shows up in as a
 // renderer in the 3d viewport menus.
 
 
-viewOverrideSimple::viewOverrideSimple( const MString & name )
+ViewOverrideSimple::ViewOverrideSimple( const MString & name )
 : MRenderOverride( name )
 , mUIName("Simple VP2 Override")
 , mCurrentOperation(-1)
 {
-	mOperations[0] = mOperations[1] = mOperations[2] = mOperations[3] = NULL;
-	mOperationNames[0] = "viewOverrideSimple_Scene";
-	mOperationNames[1] = "viewOverrideSimple_Quad";
-	mOperationNames[2] = "viewOverrideSimple_HUD";
-	mOperationNames[3] = "viewOverrideSimple_Present";
+	mOperations[0] = mOperations[1] = mOperations[2] = mOperations[3] = mOperations[4] = mOperations[5] = NULL;
+	mOperationNames[0] = "viewOverrideSimple_ScenePreUI";
+	mOperationNames[1] = "viewOverrideSimple_Scene";
+	mOperationNames[2] = "viewOverrideSimple_Quad";
+	mOperationNames[3] = "viewOverrideSimple_ScenePostUI";
+	mOperationNames[4] = "viewOverrideSimple_Present";
 	
 	//MSAA sample count, we don't want MSAA here
 	unsigned int sampleCount =1; 
@@ -34,21 +36,19 @@ viewOverrideSimple::viewOverrideSimple( const MString & name )
 
 	//Create color buffer first
 	mTargetOverrideNames[0] = MString("_viewRender_SSAA_color");
-	mTargetDescriptions	[0] =
-		new MHWRender::MRenderTargetDescription(mTargetOverrideNames[0], 256, 256, sampleCount, colorFormat, 1, false);
+	mTargetDescriptions	[0] = new MHWRender::MRenderTargetDescription(mTargetOverrideNames[0], 256, 256, sampleCount, colorFormat, 1, false);
 	mTargets			[0] = NULL;
 	
 	//We also need to created a depth buffer
 	mTargetOverrideNames[1] = MString("_viewRender_SSAA_depth");
-	mTargetDescriptions	[1] =
-		new MHWRender::MRenderTargetDescription(mTargetOverrideNames[1], 256, 256, sampleCount, MHWRender::kD24S8, 1, false);
+	mTargetDescriptions	[1] = new MHWRender::MRenderTargetDescription(mTargetOverrideNames[1], 256, 256, sampleCount, MHWRender::kD32_FLOAT, 1, false);
 	mTargets			[1] = NULL;
 
 }
 
 // On destruction all operations are deleted.
 //
-viewOverrideSimple::~viewOverrideSimple()
+ViewOverrideSimple::~ViewOverrideSimple()
 {
 	for (unsigned int i=0; i<TOTAL_RENDER_OPERATIONS; i++)
 	{
@@ -81,7 +81,7 @@ viewOverrideSimple::~viewOverrideSimple()
 	
 // I've only written a core profile shader, so it only supports core profile now.
 //
-MHWRender::DrawAPI viewOverrideSimple::supportedDrawAPIs() const
+MHWRender::DrawAPI ViewOverrideSimple::supportedDrawAPIs() const
 {
 	return MHWRender::kOpenGLCoreProfile;
 }
@@ -93,14 +93,14 @@ MHWRender::DrawAPI viewOverrideSimple::supportedDrawAPIs() const
 // - renderOperation() : will be called to return the current operation
 // - nextRenderOperation() : when this returns false we've returned all operations
 //
-bool viewOverrideSimple::startOperationIterator()
+bool ViewOverrideSimple::startOperationIterator()
 {
 	mCurrentOperation = 0;
 	return true;
 }
 
 MHWRender::MRenderOperation*
-viewOverrideSimple::renderOperation()
+ViewOverrideSimple::renderOperation()
 {
 	if (mCurrentOperation >= 0 && mCurrentOperation < TOTAL_RENDER_OPERATIONS)
 	{
@@ -113,7 +113,7 @@ viewOverrideSimple::renderOperation()
 }
 
 bool 
-viewOverrideSimple::nextRenderOperation()
+ViewOverrideSimple::nextRenderOperation()
 {
 	mCurrentOperation++;
 	if (mCurrentOperation < TOTAL_RENDER_OPERATIONS)
@@ -135,7 +135,7 @@ viewOverrideSimple::nextRenderOperation()
 //	- One "stock" HUD render operation to draw the HUD over the scene
 //	- One "stock" presentation operation to be able to see the results in the viewport
 //
-MStatus viewOverrideSimple::setup( const MString & destination )
+MStatus ViewOverrideSimple::setup( const MString & destination )
 {
 	if (!mOperations[0])
 	{
@@ -151,8 +151,8 @@ MStatus viewOverrideSimple::setup( const MString & destination )
 		theRenderer->outputTargetSize( targetWidth, targetHeight );
 
 		// Double size the render target.
-		targetHeight *= 2;
-		targetWidth *= 2;
+		targetHeight *= 4;
+		targetWidth *= 4;
 
 		for(int i = 0; i < 2; ++i)
 		{
@@ -169,34 +169,36 @@ MStatus viewOverrideSimple::setup( const MString & destination )
 			}
 		}
 
-		mOperations[0] = (MHWRender::MRenderOperation *) new simpleViewRenderSceneRender( mOperationNames[1] );
-		mOperations[1] = (MHWRender::MRenderOperation *) new simpleViewRenderQuadRender( mOperationNames[2] );
-		mOperations[2] = (MHWRender::MRenderOperation *) new simpleViewRenderHudRender();
-		mOperations[3] = (MHWRender::MRenderOperation *) new simpleViewRenderPresentRender( mOperationNames[3] );
+		mOperations[0] = (MHWRender::MRenderOperation *) new SimpleViewRenderSceneRender( mOperationNames[0], true );
+		mOperations[1] = (MHWRender::MRenderOperation*) new SimpleViewRenderSceneRender(mOperationNames[1], false);
+		mOperations[2] = (MHWRender::MRenderOperation *) new SimpleViewRenderQuadRender( mOperationNames[2] );
+		mOperations[3] = (MHWRender::MRenderOperation*) new SimpleViewRenderSceneRenderUI(mOperationNames[3]);
+		mOperations[4] = (MHWRender::MRenderOperation*) new MHUDRender();
+		mOperations[5] = (MHWRender::MRenderOperation*) new MPresentTarget(mOperationNames[4]);
 	}
 	if (!mOperations[0] ||
 		!mOperations[1] || 
 		!mOperations[2] ||
-		!mOperations[3])
+		!mOperations[3] ||
+		!mOperations[4] ||
+		!mOperations[5])
 	{
 		return MStatus::kFailure;
 	}
-	else
-	{
-		//Set custom render targets
-		((simpleViewRenderSceneRender*)mOperations[0])->setRenderTargets(mTargets, 2);
-		((simpleViewRenderSceneRender*)mOperations[0])->setQuadRender((simpleViewRenderQuadRender*)mOperations[1]);
-	}
+	//Set custom render targets
+	((SimpleViewRenderSceneRender*)mOperations[0])->setRenderTargets(mTargets, 2);
+	((SimpleViewRenderSceneRender*)mOperations[1])->setRenderTargets(mTargets, 2);
+	((SimpleViewRenderSceneRender*)mOperations[1])->setQuadRender((SimpleViewRenderQuadRender*)mOperations[2]);
 
 	return MStatus::kSuccess;
 }
 
 // On cleanup we will clean the targets for scene and quad operations
 //
-MStatus viewOverrideSimple::cleanup()
+MStatus ViewOverrideSimple::cleanup()
 {
 	mCurrentOperation = -1;
-	auto quadOp = (simpleViewRenderQuadRender *)mOperations[1];
+	auto quadOp = (SimpleViewRenderQuadRender *)mOperations[2];
 	if (quadOp)
 	{
 		quadOp->setColorTarget(NULL);
@@ -204,34 +206,40 @@ MStatus viewOverrideSimple::cleanup()
 		quadOp->updateTargets();
 	}
 
-	auto *sceneOp = (simpleViewRenderSceneRender *)mOperations[0];
+	auto *sceneOp = (SimpleViewRenderSceneRender *)mOperations[0];
 	if (sceneOp)
 	{
 		sceneOp->setRenderTargets( NULL, 0 );
 	}
 
+	sceneOp = (SimpleViewRenderSceneRender*)mOperations[1];
+	if (sceneOp)
+	{
+		sceneOp->setRenderTargets(NULL, 0);
+
+	}
 	return MStatus::kSuccess;
 }
 
 
-simpleViewRenderSceneRender::simpleViewRenderSceneRender(const MString &name)
+SimpleViewRenderSceneRender::SimpleViewRenderSceneRender(const MString &name, bool isPreUI)
 : MSceneRender( name ),  
   mTargets(NULL),
   numTargets(0),
-  currentLoop(0),
-  mSimpleQuadRender(NULL)
+  mSimpleQuadRender(NULL),
+	mIsPreUI(isPreUI)
 {
 	 
 }
 
-void simpleViewRenderSceneRender::setRenderTargets(MHWRender::MRenderTarget **targets, unsigned int targetCount)
+void SimpleViewRenderSceneRender::setRenderTargets(MHWRender::MRenderTarget **targets, unsigned int targetCount)
 {
 	mTargets = targets;
 	numTargets = targetCount;
 }
 
 //Override render targets
-MHWRender::MRenderTarget* const*  simpleViewRenderSceneRender::targetOverrideList(unsigned int &listSize)
+MHWRender::MRenderTarget* const*  SimpleViewRenderSceneRender::targetOverrideList(unsigned int &listSize)
 {
 	if(mTargets)
 	{
@@ -245,8 +253,13 @@ MHWRender::MRenderTarget* const*  simpleViewRenderSceneRender::targetOverrideLis
 
 // Clear operation
 MHWRender::MClearOperation &
-simpleViewRenderSceneRender::clearOperation()
+SimpleViewRenderSceneRender::clearOperation()
 {
+	if(!mIsPreUI) {
+		mClearOperation.setMask((unsigned int)MHWRender::MClearOperation::kClearNone);
+		return mClearOperation;
+	}
+
 	MHWRender::MRenderer* renderer = MHWRender::MRenderer::theRenderer();
 	bool gradient = renderer->useGradient();
 	MColor color1 = renderer->clearColor();
@@ -262,24 +275,37 @@ simpleViewRenderSceneRender::clearOperation()
 }
 
 // During the post scene rendering, set current output targets as input for our quad shader.
-void simpleViewRenderSceneRender::postSceneRender(const MHWRender::MDrawContext & context)
+void SimpleViewRenderSceneRender::postSceneRender(const MHWRender::MDrawContext & context)
 {
+	
 	if(mSimpleQuadRender)
 	{				
 		mSimpleQuadRender->setColorTarget(mTargets[0]);
 		mSimpleQuadRender->setDepthTarget(mTargets[1]);
+
+		auto cameraPath = context.getCurrentCameraPath();
+
 		mSimpleQuadRender->updateTargets();
+
+		MFnCamera camera(cameraPath);
+		auto near = camera.nearClippingPlane();
+		auto far = camera.farClippingPlane();
+
+		mSimpleQuadRender->setClippingPlane(near, far);
+	 
 	}
 }
 
 // Get a bicubic shader from shader effect file.
 // For OpenGL core profile, it is located inside Maya/bin/OGSFX
-simpleViewRenderQuadRender::simpleViewRenderQuadRender(const MString &name)
+SimpleViewRenderQuadRender::SimpleViewRenderQuadRender(const MString &name)
 	: MQuadRender( name )
 	, mShaderInstance(NULL)
 	, mColorTargetChanged(false)
 	, mDepthTargetChanged(false)
 	, fSamplerState(NULL)
+	, mNear(0.1f)
+	, mFar(10000.f)
 	
 {
 	mDepthTarget.target = NULL;
@@ -288,15 +314,14 @@ simpleViewRenderQuadRender::simpleViewRenderQuadRender(const MString &name)
 	{
 		MHWRender::MRenderer* renderer = MHWRender::MRenderer::theRenderer();
 		const MHWRender::MShaderManager* shaderMgr = renderer ? renderer->getShaderManager() : NULL;
-		if (shaderMgr)
-		{
+		if (shaderMgr){
 			//Create our bicubic shader
-			mShaderInstance = shaderMgr->getEffectsFileShader( "mayaBlitColorDepthBicubic", "" );
+			mShaderInstance = shaderMgr->getEffectsFileShader( "mayaBlitColorDepthBicubic", USE_DEPTH_TO_COLOR ? "DepthToColor" : "" );
 		}		
 	}
 }
 
-MHWRender::MClearOperation& simpleViewRenderQuadRender::clearOperation()
+MHWRender::MClearOperation& SimpleViewRenderQuadRender::clearOperation()
 {
 	
 	mClearOperation.setClearGradient( false );
@@ -306,13 +331,13 @@ MHWRender::MClearOperation& simpleViewRenderQuadRender::clearOperation()
 }
 
 // Return our bicubic shader
-const MHWRender::MShaderInstance * simpleViewRenderQuadRender::shader()
+const MHWRender::MShaderInstance * SimpleViewRenderQuadRender::shader()
 {
 	return mShaderInstance;
 }
 
 //Update render targets
-void simpleViewRenderQuadRender::updateTargets()
+void SimpleViewRenderQuadRender::updateTargets()
 {
 	if(mShaderInstance)
 	{
@@ -327,6 +352,7 @@ void simpleViewRenderQuadRender::updateTargets()
 		if (fSamplerState)
 		{
 			mShaderInstance->setParameter("gColorSampler", *fSamplerState);
+			mShaderInstance->setParameter("gDepthSampler", *fSamplerState);
 		}
 		if (mColorTargetChanged)
 		{
@@ -338,9 +364,12 @@ void simpleViewRenderQuadRender::updateTargets()
 			mShaderInstance->setParameter("gDepthTex", mDepthTarget);
 			mDepthTargetChanged = false;
 		}
+		mShaderInstance->setParameter("near", mNear);
+		mShaderInstance->setParameter("far", mFar);
+
 	}
 }
-simpleViewRenderQuadRender::~simpleViewRenderQuadRender()
+SimpleViewRenderQuadRender::~SimpleViewRenderQuadRender()
 {
 	MHWRender::MRenderer* renderer = MHWRender::MRenderer::theRenderer();
 	if (!renderer)

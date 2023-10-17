@@ -19,9 +19,6 @@ uniform sampler2D gColorSampler = sampler_state
     Texture = <gColorTex>;
 };
 
-// Disable alpha output.
-uniform bool gDisableAlpha;
-
 // Depth texture. Assumed to be 1 channel normalized between 0 and 1
 uniform texture2D gDepthTex : SourceTexture2
 <
@@ -33,12 +30,80 @@ uniform sampler2D gDepthSampler = sampler_state
     Texture = <gDepthTex>;
 };
 
+// Linearize depth for color display.
+uniform float near;
+uniform float far;
 
-// Pixel shader for color + depth
+
+
+// Pixel shader for color + depth with bicubic
 //
 GLSLShader PS_BlitColorDepth
 {
-	vec4 CINT(vec4 pn_1, vec4 pn, vec4 pn1, vec4 pn2, float t)
+
+    // BiCubic 
+    vec4 CINT(vec4 pn_1, vec4 pn, vec4 pn1, vec4 pn2, float t)
+    {
+        vec4 a = -pn_1  * 0.5 + 1.5 * pn - 1.5 * pn1 + pn2 * 0.5;
+        vec4 b = pn_1 - 2.5 * pn + 2.0 * pn1 - pn2 * 0.5;
+        vec4 c = -pn_1  * 0.5 + pn1 * 0.5;
+        vec4 d = pn;
+        float t2 = t * t;
+        float t3 = t2 * t;
+        return a*t3 + b*t2 + c*t + d;
+    }
+
+    vec4 textureBicubic(sampler2D sampler, vec2 texCoords)
+    {
+        vec2 texSize = textureSize(sampler, 0);
+        vec2 fTexCoord = 1.0 / texSize;
+        vec2 f = texSize * texCoords - 0.5;
+        f = fract(f);
+        
+        vec4 p00 = texture(sampler, texCoords + vec2(-fTexCoord.x, -fTexCoord.y));
+        vec4 p01 = texture(sampler, texCoords + vec2(0, -fTexCoord.y));
+        vec4 p02 = texture(sampler, texCoords + vec2(fTexCoord.x, -fTexCoord.y));
+        vec4 p03 = texture(sampler, texCoords + vec2(fTexCoord.x + fTexCoord.x, -fTexCoord.y));
+
+        vec4 p10 = texture(sampler, texCoords + vec2(-fTexCoord.x, 0));
+        vec4 p11 = texture(sampler, texCoords + vec2(0, 0));
+        vec4 p12 = texture(sampler, texCoords + vec2(fTexCoord.x, 0));
+        vec4 p13 = texture(sampler, texCoords + vec2(fTexCoord.x + fTexCoord.x, 0));
+
+        vec4 p20 = texture(sampler, texCoords + vec2(-fTexCoord.x, fTexCoord.y));
+        vec4 p21 = texture(sampler, texCoords + vec2(0, fTexCoord.y));
+        vec4 p22 = texture(sampler, texCoords + fTexCoord);
+        vec4 p23 = texture(sampler, texCoords + vec2(fTexCoord.x + fTexCoord.x, fTexCoord.y));
+
+        vec4 p30 = texture(sampler, texCoords + vec2(-fTexCoord.x, fTexCoord.y + fTexCoord.y));
+        vec4 p31 = texture(sampler, texCoords + vec2(0, fTexCoord.y + fTexCoord.y));
+        vec4 p32 = texture(sampler, texCoords + vec2(fTexCoord.x, fTexCoord.y + fTexCoord.y));
+        vec4 p33 = texture(sampler, texCoords + fTexCoord + fTexCoord);
+
+        vec4 b1 = CINT(p00, p01, p02, p03, f.x);
+        vec4 b2 = CINT(p10, p11, p12, p13, f.x);
+        vec4 b3 = CINT(p20, p21, p22, p23, f.x);
+        vec4 b4 = CINT(p30, p31, p32, p33, f.x);
+        return CINT(b1, b2, b3, b4, f.y);
+    }
+	void main()
+	{
+		// Output color
+		//
+		vec2 uv = VSUV;
+		
+        colorOut = textureBicubic(gColorSampler, uv);
+        vec4 depth = textureBicubic(gDepthSampler, uv); 
+	    gl_FragDepth = depth.r;
+    }
+}
+
+// Debug depth to color with linearize. Assumes a R32 single channel texture. 
+// www.geeks3d.com/20091216/geexlab-how-to-visualize-the-depth-buffer-in-glsl/
+GLSLShader PS_BlitDepthToColor
+{
+    // BiCubic 
+    vec4 CINT(vec4 pn_1, vec4 pn, vec4 pn1, vec4 pn2, float t)
     {
         vec4 a = -pn_1  * 0.5 + 1.5 * pn - 1.5 * pn1 + pn2 * 0.5;
         vec4 b = pn_1 - 2.5 * pn + 2.0 * pn1 - pn2 * 0.5;
@@ -85,27 +150,11 @@ GLSLShader PS_BlitColorDepth
 
 	void main()
 	{
-		// Output color
-		//
 		vec2 uv = VSUV;
-		
-        colorOut = textureBicubic(gColorSampler, uv);
-        vec4 depth = textureBicubic(gDepthSampler, uv); 
-		gl_FragDepth = depth.r;
-	}
-}
-
-// Debug depth to color. Assumes a R32 single channel texture.
-//
-GLSLShader PS_BlitDepthToColor
-{
-
-	void main()
-	{
-		vec2 uv = VSUV;
-	
-		vec4 depth = texture2D(gDepthSampler, uv); 
-		colorOut = vec4(depth.r, depth.r, depth.r, 1.0);
+		vec4 depth = textureBicubic(gDepthSampler, uv); 
+		float outColor = (2.0 * near) / (far + near - depth.r * (far - near));
+		colorOut = vec4(outColor, outColor, outColor, 1.0);
+        gl_FragDepth = depth.r;
 	}
 }
 

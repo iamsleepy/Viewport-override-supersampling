@@ -12,15 +12,18 @@
 #include <maya/MPxCommand.h>
 #include <maya/MShaderManager.h>
 
-#define TOTAL_RENDER_OPERATIONS 4
+// Use depth to color technique
+#define USE_DEPTH_TO_COLOR false
+
+#define TOTAL_RENDER_OPERATIONS 6
 //
 // Simple override class derived from MRenderOverride
 //
-class viewOverrideSimple : public MHWRender::MRenderOverride
+class ViewOverrideSimple : public MHWRender::MRenderOverride
 {
 public:
-	viewOverrideSimple( const MString & name );
-	virtual ~viewOverrideSimple();
+	ViewOverrideSimple( const MString & name );
+	virtual ~ViewOverrideSimple();
 	virtual MHWRender::DrawAPI supportedDrawAPIs() const;
 
 	// Basic setup and cleanup
@@ -55,22 +58,25 @@ protected:
 	MHWRender::MRenderTarget* mTargets[2];
 
 };
-class simpleViewRenderQuadRender : public MHWRender::MQuadRender
+class SimpleViewRenderQuadRender : public MHWRender::MQuadRender
 {
 public:
-	simpleViewRenderQuadRender(const MString &name);
-	~simpleViewRenderQuadRender();
+	SimpleViewRenderQuadRender(const MString& name);
+	~SimpleViewRenderQuadRender();
 
 	virtual const MHWRender::MShaderInstance * shader();
 	virtual MHWRender::MClearOperation& clearOperation();
-	void updateTargets();	
-	inline void setColorTarget(MHWRender::MRenderTarget *target)
+	void updateTargets();
+
+	void setClippingPlane(const double& near, const double& far) { mNear = near; mFar = far; }
+
+	void setColorTarget(MHWRender::MRenderTarget *target)
 	{
 		mColorTarget.target = target;
 		mColorTargetChanged = true;
 	}
 
-	inline void setDepthTarget(MHWRender::MRenderTarget* target)
+	void setDepthTarget(MHWRender::MRenderTarget* target)
 	{
 		mDepthTarget.target = target;
 		mDepthTargetChanged = true;
@@ -86,43 +92,50 @@ protected:
 	bool mColorTargetChanged;
 	bool mDepthTargetChanged;
 	const MHWRender::MSamplerState* fSamplerState;
+
+private:
+	float mNear, mFar;
 };
 //
 // Simple scene operation override to allow for clear color
 // tracking.
 //
-class simpleViewRenderSceneRender : public MHWRender::MSceneRender
+class SimpleViewRenderSceneRender : public MHWRender::MSceneRender
 {
 public:
-    simpleViewRenderSceneRender(const MString &name);
-	virtual ~simpleViewRenderSceneRender(){	mTargets = NULL; mSimpleQuadRender = NULL;}
-    virtual MHWRender::MClearOperation & clearOperation();
+    SimpleViewRenderSceneRender(const MString &name, bool isPreUI);
+	virtual ~SimpleViewRenderSceneRender(){	mTargets = NULL; mSimpleQuadRender = NULL;}
+    MHWRender::MClearOperation & clearOperation() override;
 	void setRenderTargets(MHWRender::MRenderTarget **targets, unsigned int targetCount);
-	virtual MHWRender::MRenderTarget* const* targetOverrideList(unsigned int &listSize);
-	virtual void postSceneRender(const MHWRender::MDrawContext & context);
-	inline void setQuadRender(simpleViewRenderQuadRender* quadRender){mSimpleQuadRender = quadRender;}
+    MHWRender::MRenderTarget* const* targetOverrideList(unsigned int &listSize) override;
+    void postSceneRender(const MHWRender::MDrawContext & context) override;
+	void setQuadRender(SimpleViewRenderQuadRender* quadRender){mSimpleQuadRender = quadRender;}
+	MSceneFilterOption renderFilterOverride() override
+	{
+		return mIsPreUI ? kRenderPreSceneUIItems : kRenderShadedItems;
+	}
+
+
 
 protected:
 	MHWRender::MRenderTarget **mTargets;
 	unsigned int numTargets;
-	simpleViewRenderQuadRender* mSimpleQuadRender;
+	SimpleViewRenderQuadRender* mSimpleQuadRender;
+	bool mIsPreUI;
 
-// Scene debug
-	int currentLoop;	
 };
 
-class simpleViewRenderPresentRender : public MHWRender::MPresentTarget
-{
-public:
-	simpleViewRenderPresentRender(const MString &name) : MPresentTarget(name){};
-	virtual ~simpleViewRenderPresentRender() { };
-};
-
-class simpleViewRenderHudRender : public MHWRender::MHUDRender
-{
-public:
-	simpleViewRenderHudRender():MHUDRender(){};
-	virtual ~simpleViewRenderHudRender(){};
-};
+ class SimpleViewRenderSceneRenderUI : public MHWRender::MSceneRender
+ {
+ public:
+	 SimpleViewRenderSceneRenderUI(const MString& name) :MSceneRender(name){};
+	 virtual ~SimpleViewRenderSceneRenderUI(){}
+	 MHWRender::MClearOperation& clearOperation() override { mClearOperation.setMask((unsigned int)MHWRender::MClearOperation::kClearNone); return mClearOperation; };
+	
+	 MSceneFilterOption renderFilterOverride() override
+	 {
+		 return kRenderPostSceneUIItems;
+	 }
+ };
 
 #endif
